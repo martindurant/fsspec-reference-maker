@@ -1,3 +1,6 @@
+import fsspec
+
+
 def class_factory(func):
     """Experimental uniform API across function-based file scanners"""
 
@@ -25,3 +28,29 @@ def class_factory(func):
         __repr__ = __str__
 
     return FunctionWrapper
+
+
+def apply_offsets(refs, **storage_options):
+    fs = fsspec.filesystem("reference", fo=refs, **storage_options)
+    if "tar" in fs.fss:
+        target = fs.fss["tar"]
+        offsets = {ti.name: (ti.offset_data, ti.size) for ti in target.tar.getmembers()}
+    elif "zip" in fs.fss:
+        target = fs.fss["zip"]
+        offsets = {
+            zi.filename: (zi.header_offset + len(zi.FileHeader()), zi.file_size)
+            for zi in target.filelist
+        }
+    else:
+        raise NotImplementedError
+    remote = target.fs.of.name
+    outref = {}
+    for key, val in fs.references.items():
+        k = target._strip_protocol(key)
+        if isinstance(val, (str, bytes)):
+            outref[key] = val
+        if len(val) == 1:
+            outref[k] = [remote] + offsets
+        else:
+            outref[k] = [remote, val[0] + offsets[0], val[1]]
+    return outref
